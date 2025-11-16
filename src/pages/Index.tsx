@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import Icon from '@/components/ui/icon';
 import { Progress } from '@/components/ui/progress';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/hooks/use-toast';
 
 interface Student {
   id: number;
@@ -26,7 +29,7 @@ interface ScheduleItem {
   homework: string;
 }
 
-const mockStudents: Student[] = [
+const defaultStudents: Student[] = [
   {
     id: 1,
     name: 'Александра Иванова',
@@ -62,7 +65,7 @@ const mockStudents: Student[] = [
   },
 ];
 
-const mockSchedule: ScheduleItem[] = [
+const defaultSchedule: ScheduleItem[] = [
   {
     id: 1,
     day: 'Понедельник',
@@ -90,15 +93,126 @@ const mockSchedule: ScheduleItem[] = [
 ];
 
 export default function Index() {
+  const { toast } = useToast();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
+  const [students, setStudents] = useState<Student[]>([]);
+  const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState<ScheduleItem | null>(null);
+  const [isAddingStudent, setIsAddingStudent] = useState(false);
+  const [isAddingSchedule, setIsAddingSchedule] = useState(false);
+
+  useEffect(() => {
+    const savedStudents = localStorage.getItem('cyberschool_students');
+    const savedSchedule = localStorage.getItem('cyberschool_schedule');
+    
+    if (savedStudents) {
+      setStudents(JSON.parse(savedStudents));
+    } else {
+      setStudents(defaultStudents);
+    }
+    
+    if (savedSchedule) {
+      setSchedule(JSON.parse(savedSchedule));
+    } else {
+      setSchedule(defaultSchedule);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (students.length > 0) {
+      localStorage.setItem('cyberschool_students', JSON.stringify(students));
+    }
+  }, [students]);
+
+  useEffect(() => {
+    if (schedule.length > 0) {
+      localStorage.setItem('cyberschool_schedule', JSON.stringify(schedule));
+    }
+  }, [schedule]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (login === '22' && password === '22') {
       setIsLoggedIn(true);
     }
+  };
+
+  const calculateAvgGrade = (subjects: { name: string; grade: number }[]) => {
+    if (subjects.length === 0) return 0;
+    return subjects.reduce((sum, s) => sum + s.grade, 0) / subjects.length;
+  };
+
+  const handleSaveStudent = (student: Student) => {
+    const avgGrade = calculateAvgGrade(student.subjects);
+    const updatedStudent = { ...student, avgGrade };
+    
+    if (isAddingStudent) {
+      setStudents([...students, updatedStudent]);
+      toast({ title: 'Учащийся добавлен' });
+    } else {
+      setStudents(students.map(s => s.id === student.id ? updatedStudent : s));
+      toast({ title: 'Данные обновлены' });
+    }
+    setEditingStudent(null);
+    setIsAddingStudent(false);
+  };
+
+  const handleDeleteStudent = (id: number) => {
+    setStudents(students.filter(s => s.id !== id));
+    toast({ title: 'Учащийся удален' });
+  };
+
+  const handleSaveSchedule = (item: ScheduleItem) => {
+    if (isAddingSchedule) {
+      setSchedule([...schedule, item]);
+      toast({ title: 'Занятие добавлено' });
+    } else {
+      setSchedule(schedule.map(s => s.id === item.id ? item : s));
+      toast({ title: 'Расписание обновлено' });
+    }
+    setEditingSchedule(null);
+    setIsAddingSchedule(false);
+  };
+
+  const handleDeleteSchedule = (id: number) => {
+    setSchedule(schedule.filter(s => s.id !== id));
+    toast({ title: 'Занятие удалено' });
+  };
+
+  const handleExportData = () => {
+    const data = {
+      students,
+      schedule,
+      exportDate: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cyberschool_data_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    toast({ title: 'Данные экспортированы' });
+  };
+
+  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (data.students) setStudents(data.students);
+        if (data.schedule) setSchedule(data.schedule);
+        toast({ title: 'Данные импортированы успешно' });
+      } catch {
+        toast({ title: 'Ошибка импорта', variant: 'destructive' });
+      }
+    };
+    reader.readAsText(file);
   };
 
   if (!isLoggedIn) {
@@ -165,14 +279,39 @@ export default function Index() {
               CyberSchool
             </h1>
           </div>
-          <Button
-            variant="outline"
-            onClick={() => setIsLoggedIn(false)}
-            className="border-primary/20 hover:bg-primary/10"
-          >
-            <Icon name="LogOut" size={18} className="mr-2" />
-            Выйти
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={handleExportData}
+              className="border-primary/20 hover:bg-primary/10"
+            >
+              <Icon name="Download" size={18} className="mr-2" />
+              Экспорт
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => document.getElementById('import-file')?.click()}
+              className="border-primary/20 hover:bg-primary/10"
+            >
+              <Icon name="Upload" size={18} className="mr-2" />
+              Импорт
+            </Button>
+            <input
+              id="import-file"
+              type="file"
+              accept=".json"
+              onChange={handleImportData}
+              className="hidden"
+            />
+            <Button
+              variant="outline"
+              onClick={() => setIsLoggedIn(false)}
+              className="border-primary/20 hover:bg-primary/10"
+            >
+              <Icon name="LogOut" size={18} className="mr-2" />
+              Выйти
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -205,8 +344,10 @@ export default function Index() {
                   <Icon name="Users" size={20} className="text-primary" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-3xl font-bold text-primary">{mockStudents.length}</div>
-                  <p className="text-xs text-muted-foreground mt-1">2 группы</p>
+                  <div className="text-3xl font-bold text-primary">{students.length}</div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {new Set(students.map(s => s.group)).size} групп
+                  </p>
                 </CardContent>
               </Card>
 
@@ -217,7 +358,9 @@ export default function Index() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-secondary">
-                    {(mockStudents.reduce((acc, s) => acc + s.avgGrade, 0) / mockStudents.length).toFixed(1)}
+                    {students.length > 0
+                      ? (students.reduce((acc, s) => acc + s.avgGrade, 0) / students.length).toFixed(1)
+                      : '0.0'}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">По всем предметам</p>
                 </CardContent>
@@ -225,12 +368,12 @@ export default function Index() {
 
               <Card className="border-primary/20 bg-card/50 backdrop-blur-sm hover:shadow-lg hover:shadow-primary/5 transition-all duration-300">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Занятий сегодня</CardTitle>
+                  <CardTitle className="text-sm font-medium">Занятий в расписании</CardTitle>
                   <Icon name="Calendar" size={20} className="text-primary" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-3xl font-bold text-primary">2</div>
-                  <p className="text-xs text-muted-foreground mt-1">3 домашних задания</p>
+                  <div className="text-3xl font-bold text-primary">{schedule.length}</div>
+                  <p className="text-xs text-muted-foreground mt-1">Всего занятий</p>
                 </CardContent>
               </Card>
             </div>
@@ -244,7 +387,7 @@ export default function Index() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {mockStudents
+                  {students
                     .sort((a, b) => b.avgGrade - a.avgGrade)
                     .slice(0, 3)
                     .map((student, index) => (
@@ -277,7 +420,7 @@ export default function Index() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {mockSchedule.slice(0, 3).map((item) => (
+                  {schedule.slice(0, 3).map((item) => (
                     <div key={item.id} className="p-4 rounded-lg border border-primary/20 bg-muted/30 hover:bg-muted/50 transition-colors">
                       <div className="flex items-start justify-between mb-2">
                         <div>
@@ -308,7 +451,7 @@ export default function Index() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                {mockStudents.map((student) => (
+                {students.map((student) => (
                   <div key={student.id} className="space-y-3 p-4 rounded-lg border border-primary/20 bg-muted/30">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -322,9 +465,19 @@ export default function Index() {
                           <div className="text-sm text-muted-foreground">{student.group}</div>
                         </div>
                       </div>
-                      <Badge className="bg-gradient-to-r from-primary to-secondary text-white border-0 text-lg px-4 py-1">
-                        {student.avgGrade.toFixed(1)}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-gradient-to-r from-primary to-secondary text-white border-0 text-lg px-4 py-1">
+                          {student.avgGrade.toFixed(1)}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEditingStudent(student)}
+                          className="border-primary/20"
+                        >
+                          <Icon name="Edit" size={16} />
+                        </Button>
+                      </div>
                     </div>
                     <div className="space-y-2">
                       {student.subjects.map((subject, idx) => (
@@ -345,14 +498,31 @@ export default function Index() {
 
           <TabsContent value="schedule" className="space-y-6">
             <Card className="border-primary/20 bg-card/50 backdrop-blur-sm">
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
                   <Icon name="CalendarDays" size={22} className="text-primary" />
                   Расписание занятий и домашние задания
                 </CardTitle>
+                <Button
+                  onClick={() => {
+                    setIsAddingSchedule(true);
+                    setEditingSchedule({
+                      id: Math.max(0, ...schedule.map(s => s.id)) + 1,
+                      day: '',
+                      time: '',
+                      subject: '',
+                      teacher: '',
+                      homework: ''
+                    });
+                  }}
+                  className="bg-gradient-to-r from-primary to-secondary"
+                >
+                  <Icon name="Plus" size={18} className="mr-2" />
+                  Добавить занятие
+                </Button>
               </CardHeader>
               <CardContent className="space-y-4">
-                {mockSchedule.map((item) => (
+                {schedule.map((item) => (
                   <div
                     key={item.id}
                     className="p-5 rounded-lg border border-primary/20 bg-gradient-to-r from-muted/30 to-muted/10 hover:from-muted/50 hover:to-muted/30 transition-all duration-300"
@@ -371,12 +541,33 @@ export default function Index() {
                           {item.teacher}
                         </p>
                       </div>
-                      <div className="flex items-start gap-3 p-4 rounded-lg bg-secondary/10 border border-secondary/20 max-w-md">
+                      <div className="flex items-start gap-3 p-4 rounded-lg bg-secondary/10 border border-secondary/20 max-w-md flex-1">
                         <Icon name="BookCheck" size={20} className="text-secondary mt-0.5" />
-                        <div>
+                        <div className="flex-1">
                           <div className="text-xs font-semibold text-secondary mb-1">ДОМАШНЕЕ ЗАДАНИЕ</div>
                           <p className="text-sm">{item.homework}</p>
                         </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setIsAddingSchedule(false);
+                            setEditingSchedule(item);
+                          }}
+                          className="border-primary/20"
+                        >
+                          <Icon name="Edit" size={16} />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteSchedule(item.id)}
+                          className="border-destructive/20 text-destructive hover:bg-destructive/10"
+                        >
+                          <Icon name="Trash2" size={16} />
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -387,15 +578,31 @@ export default function Index() {
 
           <TabsContent value="students" className="space-y-6">
             <Card className="border-primary/20 bg-card/50 backdrop-blur-sm">
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
                   <Icon name="GraduationCap" size={22} className="text-primary" />
                   Список участников
                 </CardTitle>
+                <Button
+                  onClick={() => {
+                    setIsAddingStudent(true);
+                    setEditingStudent({
+                      id: Math.max(0, ...students.map(s => s.id)) + 1,
+                      name: '',
+                      group: '',
+                      avgGrade: 0,
+                      subjects: []
+                    });
+                  }}
+                  className="bg-gradient-to-r from-primary to-secondary"
+                >
+                  <Icon name="Plus" size={18} className="mr-2" />
+                  Добавить учащегося
+                </Button>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {mockStudents.map((student) => (
+                  {students.map((student) => (
                     <div
                       key={student.id}
                       className="p-5 rounded-lg border border-primary/20 bg-gradient-to-br from-muted/30 to-transparent hover:from-muted/50 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300"
@@ -411,7 +618,7 @@ export default function Index() {
                           <p className="text-sm text-muted-foreground">{student.group}</p>
                         </div>
                       </div>
-                      <div className="space-y-2">
+                      <div className="space-y-2 mb-3">
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-muted-foreground">Средний балл</span>
                           <Badge className="bg-gradient-to-r from-primary to-secondary text-white border-0">
@@ -427,6 +634,28 @@ export default function Index() {
                           ))}
                         </div>
                       </div>
+                      <div className="flex gap-2 pt-2 border-t border-primary/10">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setIsAddingStudent(false);
+                            setEditingStudent(student);
+                          }}
+                          className="flex-1 border-primary/20"
+                        >
+                          <Icon name="Edit" size={16} className="mr-1" />
+                          Изменить
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteStudent(student.id)}
+                          className="border-destructive/20 text-destructive hover:bg-destructive/10"
+                        >
+                          <Icon name="Trash2" size={16} />
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -435,6 +664,243 @@ export default function Index() {
           </TabsContent>
         </Tabs>
       </main>
+
+      <StudentEditDialog
+        student={editingStudent}
+        isOpen={!!editingStudent}
+        isAdding={isAddingStudent}
+        onClose={() => {
+          setEditingStudent(null);
+          setIsAddingStudent(false);
+        }}
+        onSave={handleSaveStudent}
+      />
+
+      <ScheduleEditDialog
+        item={editingSchedule}
+        isOpen={!!editingSchedule}
+        isAdding={isAddingSchedule}
+        onClose={() => {
+          setEditingSchedule(null);
+          setIsAddingSchedule(false);
+        }}
+        onSave={handleSaveSchedule}
+      />
     </div>
+  );
+}
+
+function StudentEditDialog({
+  student,
+  isOpen,
+  isAdding,
+  onClose,
+  onSave,
+}: {
+  student: Student | null;
+  isOpen: boolean;
+  isAdding: boolean;
+  onClose: () => void;
+  onSave: (student: Student) => void;
+}) {
+  const [formData, setFormData] = useState<Student | null>(null);
+
+  useEffect(() => {
+    if (student) {
+      setFormData({ ...student });
+    }
+  }, [student]);
+
+  if (!formData) return null;
+
+  const handleSubjectChange = (index: number, field: 'name' | 'grade', value: string | number) => {
+    const newSubjects = [...formData.subjects];
+    newSubjects[index] = { ...newSubjects[index], [field]: value };
+    setFormData({ ...formData, subjects: newSubjects });
+  };
+
+  const addSubject = () => {
+    setFormData({
+      ...formData,
+      subjects: [...formData.subjects, { name: '', grade: 5 }]
+    });
+  };
+
+  const removeSubject = (index: number) => {
+    setFormData({
+      ...formData,
+      subjects: formData.subjects.filter((_, i) => i !== index)
+    });
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            {isAdding ? 'Добавить учащегося' : 'Редактировать данные учащегося'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Имя и фамилия</Label>
+              <Input
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="Иванов Иван"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Группа</Label>
+              <Input
+                value={formData.group}
+                onChange={(e) => setFormData({ ...formData, group: e.target.value })}
+                placeholder="КБ-101"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Предметы и оценки</Label>
+              <Button size="sm" onClick={addSubject} variant="outline">
+                <Icon name="Plus" size={16} className="mr-1" />
+                Добавить предмет
+              </Button>
+            </div>
+            {formData.subjects.map((subject, idx) => (
+              <div key={idx} className="flex gap-2">
+                <Input
+                  value={subject.name}
+                  onChange={(e) => handleSubjectChange(idx, 'name', e.target.value)}
+                  placeholder="Название предмета"
+                  className="flex-1"
+                />
+                <Input
+                  type="number"
+                  min="1"
+                  max="5"
+                  value={subject.grade}
+                  onChange={(e) => handleSubjectChange(idx, 'grade', Number(e.target.value))}
+                  className="w-20"
+                />
+                <Button
+                  size="icon"
+                  variant="outline"
+                  onClick={() => removeSubject(idx)}
+                  className="text-destructive"
+                >
+                  <Icon name="X" size={16} />
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex gap-2 pt-4">
+            <Button onClick={() => onSave(formData)} className="flex-1 bg-gradient-to-r from-primary to-secondary">
+              Сохранить
+            </Button>
+            <Button onClick={onClose} variant="outline" className="flex-1">
+              Отмена
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ScheduleEditDialog({
+  item,
+  isOpen,
+  isAdding,
+  onClose,
+  onSave,
+}: {
+  item: ScheduleItem | null;
+  isOpen: boolean;
+  isAdding: boolean;
+  onClose: () => void;
+  onSave: (item: ScheduleItem) => void;
+}) {
+  const [formData, setFormData] = useState<ScheduleItem | null>(null);
+
+  useEffect(() => {
+    if (item) {
+      setFormData({ ...item });
+    }
+  }, [item]);
+
+  if (!formData) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>
+            {isAdding ? 'Добавить занятие' : 'Редактировать занятие'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>День недели</Label>
+              <Input
+                value={formData.day}
+                onChange={(e) => setFormData({ ...formData, day: e.target.value })}
+                placeholder="Понедельник"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Время</Label>
+              <Input
+                value={formData.time}
+                onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+                placeholder="09:00"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Предмет</Label>
+              <Input
+                value={formData.subject}
+                onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
+                placeholder="Кибербезопасность"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Преподаватель</Label>
+              <Input
+                value={formData.teacher}
+                onChange={(e) => setFormData({ ...formData, teacher: e.target.value })}
+                placeholder="Иванов И.И."
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Домашнее задание</Label>
+            <Textarea
+              value={formData.homework}
+              onChange={(e) => setFormData({ ...formData, homework: e.target.value })}
+              placeholder="Описание домашнего задания"
+              rows={3}
+            />
+          </div>
+
+          <div className="flex gap-2 pt-4">
+            <Button onClick={() => onSave(formData)} className="flex-1 bg-gradient-to-r from-primary to-secondary">
+              Сохранить
+            </Button>
+            <Button onClick={onClose} variant="outline" className="flex-1">
+              Отмена
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
